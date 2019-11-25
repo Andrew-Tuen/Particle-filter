@@ -22,31 +22,120 @@ def make_file_list(dir, type):
     return np.sort(namelist).tolist()
 
 class PF():
-    def __init__(self, N):
+    def __init__(self, N, alpha, beta): #alpha 控制原始和上一帧的参考， beta控制速度的更新速率
         self.N = N
         self.W = 0
         self.H = 0
-        self.sigma = np.zeros(2,dtype=int)
-        self.s0 = np.zeros(2,dtype=int)
-        #self.hist = 
+        self.alpha = alpha
+        self.beta = beta
+        self.box0 = [0,0,0,0]
+        self.hist0 = 0
+        self.ref_box = 0
+        self.ref_hist = 0
+        self.particles = 0
+        self.speed = np.array([4,4,0,0])
+        self.weights = np.ones(N)/self.N
+
     
-    def initial(self, img, ref):
+    def initial(self, imgname, ref):
+        r"""初始化信息
+        Args: 
+            imgname: 图片路径  str
+            ref: 物体初始位置 list
+        """
+        img = self.read_image(imgname).astype(np.uint8)
         self.W = img.shape[0]
         self.H = img.shape[1]
-        self.sigma = np.array(ref[2:])
-        self.s0 = np.array(ref[:2])
+        self.ref_box = np.array(ref)
+        self.ref_hist = self.three_channel_hist(self.cut_img(img,self.ref_box))
+        self.particles = np.tile(self.ref_box, (self.N, 1))
+        self.box0 = self.ref_box
+        self.hist0 = self.ref_hist
+        self.pos_list = []
+
+    def cut_img(self, img, box):
+        ws = np.max([0,box[1]])
+        we = np.min([self.W, box[1]+box[3]])
+        we = np.max([we,ws+1])
+        hs = np.max([0,box[0]])
+        he = np.min([self.H, box[0]+box[2]])
+        he = np.max([he,hs+1])
+        return img[ws:we,hs:he,:]
+
+    def cal_weight(self, img):
+        subimgs = [self.cut_img(img, self.particles[i]) for i in  range(self.N)]
+        subhist = [self.three_channel_hist(subimgs[i]) for i in  range(self.N)]
+        dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(self.N)]
+        dis2ori = [cv2.compareHist(subhist[i], self.hist0, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(self.N)]
+        # dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_CORREL) for i in range(self.N)]
+        # dis2ori = [cv2.compareHist(subhist[i], self.hist0, method=cv2.HISTCMP_CORREL) for i in range(self.N)]
+        dis = (1-self.alpha)*np.array(dis2ori) + (self.alpha)*np.array(dis2ref)
+        # print("{}, {}".format(np.max(dis),np.min(dis)))
+        self.weights = (dis-np.max(dis)+1e-5)/(np.max(dis)-np.min(dis)+1e-5)
+        # self.weights = np.exp(self.weights)
+        self.weights /= np.sum(self.weights)
+
+    def predict(self):
+        self.particles += np.round(np.random.randn(*self.particles.shape)*self.speed*3).astype(np.int64)
+        # self.particles += np.round(np.random.randn(*self.particles.shape)*10).astype(np.int64)
+        self.particles[self.particles<1] = 1
+
+    def get_pos(self):
+        pos = np.sum(self.particles*np.expand_dims(self.weights,-1), axis=0)
+        # pos = self.particles[np.argmax(self.weights)]
+        return np.round(pos).astype(np.int64)
+
+    def update_speed(self, pos):
+        self.speed = (1-self.beta)*self.speed + np.abs(self.beta*(self.ref_box-pos))
+        self.speed = np.max(np.vstack([self.speed, np.array([3,3,1,1])]),0)
+    
+    def update_ref(self, img, pos):
+        self.ref_box = pos
+        self.ref_hist = self.three_channel_hist(self.cut_img(img,self.ref_box))
+        # self.particles[:,-2] = pos[-2]
+        # self.particles[:,-1] = pos[-1]
+        self.particles[:] = pos
+
+    def resample(self):
+        tmp = self.particles.copy()
+        int_weight = np.cumsum(self.weights)
+        total_weight = int_weight[-1]
+        for i in range(self.N):
+            T = np.random.rand()*total_weight
+            self.particles[i] = tmp[np.argmax(int_weight>T)].copy()
+            self.weights[i] = 1.0/self.N
+
+    
+    def track(self, imgnamelist):
+        for imgname in tqdm(imgnamelist):
+            img = self.read_image(imgname).astype(np.uint8)
+            # self.resample()
+            self.predict()
+            self.show_particles(img)
+            self.cal_weight(img)
+            pos = self.get_pos()
+            self.pos_list.append(pos.tolist())
+            # self.update_speed(pos)
+            self.update_ref(img, pos)
+            
 
 
     @staticmethod
     def three_channel_hist(img):
-        hist = np.zeros((3,256))
-        for i in range(3):
-            hist[i] = np.squeeze(cv2.calcHist(img, [i], None, [256], [0,256]))
+        r"""计算三通道直方图
+        Args: 
+            img: 图片 float (H*W*C)
+        Return: 
+            hist: 直方图  float  (256C)
+        """
         
-        for i in range(256):
-            print(hist[:,i])     
+        hist = [cv2.calcHist([img], [i], None, [256], [0,256]) for i in range(3)]
+        hist = np.vstack(hist)
+        # sim = cv2.compareHist(hist, hist, method=cv2.HISTCMP_BHATTACHARYYA)
+        # print(sim)
+        # for i in range(256):
+        #     print([hist[:,i]])     
         return hist
-
 
     @staticmethod
     def read_image(imgname):
@@ -54,7 +143,7 @@ class PF():
         Args: 
             imgname: 图片路径  str
         Return: 
-            img: 图片  float  (H*W*C)
+            img: 图片  int  (H*W*C)
         """
         # imgname = '../WavingTrees/b'+str(i).zfill(5)+'.bmp'
         # img = plt.imread(imgname)
@@ -103,7 +192,24 @@ class PF():
             cv2.destroyAllWindows()
         return imgbox
 
+    def show_particles(self, img):
+        boxed_img = img.copy()
+        point_color = (0, 255, 0) # BGR
+        thickness = 1 
+        lineType = 4
+        for i in range(self.N):
+            box = self.particles[i]
+            ptLeftTop = (box[0], box[1])
+            ptRightBottom = (box[0]+box[2], box[1]+box[3])
+            cv2.rectangle(boxed_img, ptLeftTop, ptRightBottom, point_color, thickness, lineType)
+        self.disp_imgs(img, boxed_img, ny=2, nx=1, size=(img.shape[1],img.shape[0]), scale=0.8, show_img=True)
+
     def show_box(self, imglist, boxlist):
+        r"""显示原图和加了box的图
+        Args: 
+            imglist: 图片路径合集  list of str
+            boxlist: 位置合集
+        """
         point_color = (0, 255, 0) # BGR
         thickness = 1 
         lineType = 4
@@ -111,23 +217,29 @@ class PF():
         # print(boxlist)
         for imgname, box in tqdm(zip(imgnamelist, boxlist)):
             img = self.read_image(imgname).astype(np.uint8)
-            print(box[0]+box[2])
             inbox = img[box[1]:box[1]+box[3],box[0]:box[0]+box[2],:]
             hist = self.three_channel_hist(inbox)
             ptLeftTop = (box[0], box[1])
             ptRightBottom = (box[0]+box[2], box[1]+box[3])
             boxed = cv2.rectangle(img, ptLeftTop, ptRightBottom, point_color, thickness, lineType)
             img = self.read_image(imgname).astype(np.uint8)
-            ibx = self.disp_imgs(img[box[1]:box[1]+box[3],box[0]:box[0]+box[2],:], boxed, ny=2, nx=1, size=(img.shape[1],img.shape[0]), scale=0.8, show_img=True)
+            ibx = self.disp_imgs(img[box[1]:box[1]+box[3],box[0]:box[0]+box[2],:], boxed, ny=2, nx=1, size=(img.shape[1],img.shape[0]), scale=3, show_img=True)
 
 
 if __name__ == '__main__':
-    imgdir = r'../Bird1/img/'
-    gtfile = r'../Bird1/groundtruth_rect.txt'
+    imgdir = r'./data/Man/img/'
+    gtfile = r'./data/Man/groundtruth_rect.txt'
     imgtype = r'jpg'
-    pf = PF(500)
-    show_img = True
+
     imgnamelist = make_file_list(imgdir, imgtype)
     groundtruth = np.loadtxt(gtfile, delimiter=',',dtype=int).tolist()
-    print(groundtruth)
-    pf.show_box(imgnamelist, groundtruth)
+
+    pf = PF(100, 1.0, 0.0)
+    pf.initial(imgnamelist[0], groundtruth[0])
+    pf.track(imgnamelist)
+
+    show_img = True
+    
+    # print(groundtruth)
+    # pf.show_box(imgnamelist, groundtruth)
+    pf.show_box(imgnamelist, pf.pos_list)
