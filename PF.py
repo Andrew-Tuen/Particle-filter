@@ -1,6 +1,6 @@
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
+# import matplotlib
+# import matplotlib.pyplot as plt
+# import matplotlib.image as mpimg
 import numpy as np
 import cv2
 import os
@@ -122,12 +122,12 @@ class PF():
 
 
 if __name__ == '__main__':
-    imgdir = r'./Bird1/img/'
-    gtfile = r'./Bird1/groundtruth_rect.txt'
+    imgdir = r'../Bird1/img/'
+    gtfile = r'../Bird1/groundtruth_rect.txt'
     imgtype = r'jpg'
     pf = PF(500)
     show_img = True
     imgnamelist = make_file_list(imgdir, imgtype)
     groundtruth = np.loadtxt(gtfile, delimiter=',',dtype=int).tolist()
-    # print(groundtruth)
+    print(groundtruth)
     pf.show_box(imgnamelist, groundtruth)
