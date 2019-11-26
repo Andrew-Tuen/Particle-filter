@@ -64,38 +64,67 @@ class PF():
         return img[ws:we,hs:he,:]
 
     def cal_scale(self, pos):
-        self.scale = (1-0.5*self.beta)*self.scale + self.beta*0.5*self.ref_box[-1]*self.ref_box[-2]/pos[-1]/pos[-2] + self.beta*0.5*self.box0[-1]*self.box0[-2]/pos[-1]/pos[-2]
+        self.scale = (1-self.beta)*self.scale + self.beta*self.ref_box[-1]*self.ref_box[-2]/pos[-1]/pos[-2]
 
 
     def cal_weight(self, img):
-        subimgs = [self.cut_img(img, self.particles[i]) for i in range(self.N)]
+        N = len(self.particles)
+        subimgs = [self.cut_img(img, self.particles[i]) for i in range(N)]
         # self.disp_imgs(*subimgs, nx=7, ny=15, size=(100,100), scale=0.7, name='FIGURE', show_img=True)
 
-        subhist = [self.three_channel_hist(subimgs[i]) for i in range(self.N)]
-        dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(self.N)]
-        dis2ori = [cv2.compareHist(subhist[i], self.hist0, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(self.N)]
-        # dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_CORREL) for i in range(self.N)]
-        # dis2ori = [cv2.compareHist(subhist[i], self.hist0, method=cv2.HISTCMP_CORREL) for i in range(self.N)]
-        dis = (1-self.alpha)*np.array(dis2ori) + (self.alpha)*np.array(dis2ref)
+        subhist = [self.three_channel_hist(subimgs[i]) for i in range(N)]
+        dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(N)]
+        dis2ori = [cv2.compareHist(subhist[i], self.hist0, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(N)]
+        # dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_CORREL) for i in range(N)]
+        # dis2ori = [cv2.compareHist(subhist[i], self.hist0, method=cv2.HISTCMP_CORREL) for i in range(N)]
+        dis = (1-self.alpha)*np.array(dis2ori) + (self.alpha)*np.array(dis2ref) 
         # print("{}, {}".format(np.max(dis),np.min(dis)))
         self.weights = (dis-np.max(dis)+1e-50)/(np.max(dis)-np.min(dis)+1e-50)
-        # self.weights = np.exp(self.weights)
         self.weights /= np.sum(self.weights)
+        index = np.argsort(-self.weights)
+        self.weights = self.weights[index]
+        self.particles = self.particles[index]
+        self.weights = self.weights[:self.N]
+        self.particles = self.particles[:self.N]
+        return 1.0+2*cv2.compareHist(self.hist0, self.ref_hist, method=cv2.HISTCMP_BHATTACHARYYA)
 
-    def predict(self):
-        tmpp = self.particles + np.random.randn(*self.particles.shape)*np.array([50,50,0,0])
-        tmpp += self.speed
-        scale = (np.random.randn(self.N,1)*np.sqrt(self.scale)*0.3)+1.0
+    def predict(self, var):
+        tmpp = self.particles + np.random.randn(*self.particles.shape)*np.array([var,var,0,0])
+        tmpp += self.speed*np.random.rand(self.N,4)
+        # scale = (np.random.randn(self.N,1)*np.sqrt(self.scale)*0.15)+1.0
 
-        shift = tmpp[:,2:]*(1.0-scale)*0.5
-        tmpp[:,:2] += shift
-        tmpp[:,2:] *= scale
+        # shift = tmpp[:,2:]*(1.0-scale)*0.5
+        # tmpp[:,:2] += shift
+        # tmpp[:,2:] *= scale
+        self.particles = np.round(tmpp).astype(np.int64)
+        self.particles[self.particles<1] = 1
+
+    def change_scale(self):
+        
+        tmpp = self.particles[:20].copy()
+        for scale in np.arange(0.6,1.2,0.01):
+            scdp = tmpp[:20].copy()*1.0
+            shift = scdp[:,2:]*(1.0-scale)*0.5
+            scdp[:,:2] += shift
+            scdp[:,2:] *= scale
+            tmpp = np.vstack([tmpp,scdp])
         self.particles = np.round(tmpp).astype(np.int64)
         self.particles[self.particles<1] = 1
 
     def get_pos(self):
+
+        
+        tmpw = self.weights[:100]
+        tmpp = self.particles[:100]
+
+        # subparticle = subparticle[:int(self.N/10)]
+        # subweight = subweight[:int(self.N/10)]
+        
+        tmpw = tmpw / np.sum(tmpw)
+        pos = 0.3*self.ref_box + 0.7*np.sum(tmpp*np.expand_dims(tmpw,-1), axis=0)
+
         # pos = np.sum(self.particles*np.expand_dims(self.weights,-1), axis=0)
-        pos = self.particles[np.argmax(self.weights)]
+        # pos = self.particles[np.argmax(self.weights)]
         return np.round(pos).astype(np.int64)
 
     def update_speed(self, pos):
@@ -120,14 +149,17 @@ class PF():
 
     
     def track(self, imgnamelist):
+        t = 1.0
         for imgname in tqdm(imgnamelist):
             img = self.read_image(imgname).astype(np.uint8)
             self.resample()
-            self.predict()
-            self.show_particles(img)
+            self.predict(30*t)
+            t = self.cal_weight(img)
+            self.change_scale()
             self.cal_weight(img)
             pos = self.get_pos()
-            self.cal_scale(pos)
+            # self.show_particles(img, pos)
+            # self.cal_scale(pos)
             self.pos_list.append(pos.tolist())
             self.update_speed(pos)
             self.update_ref(img, pos)
@@ -145,10 +177,6 @@ class PF():
         
         hist = [cv2.calcHist([img], [i], None, [256], [0,256]) for i in range(3)]
         hist = np.vstack(hist)
-        # sim = cv2.compareHist(hist, hist, method=cv2.HISTCMP_BHATTACHARYYA)
-        # print(sim)
-        # for i in range(256):
-        #     print([hist[:,i]])     
         return hist
 
     @staticmethod
@@ -206,7 +234,7 @@ class PF():
             cv2.destroyAllWindows()
         return imgbox
 
-    def show_particles(self, img):
+    def show_particles(self, img, pos):
         boxed_img = img.copy()
         best_img = img.copy()
         point_color = (0, 255, 0) # BGR
@@ -217,7 +245,7 @@ class PF():
             ptLeftTop = (box[0], box[1])
             ptRightBottom = (box[0]+box[2], box[1]+box[3])
             cv2.rectangle(boxed_img, ptLeftTop, ptRightBottom, point_color, thickness, lineType)
-        box = self.ref_box
+        box = pos
         ptLeftTop = (box[0], box[1])
         ptRightBottom = (box[0]+box[2], box[1]+box[3])
         cv2.rectangle(best_img, ptLeftTop, ptRightBottom, point_color, thickness, lineType)
@@ -244,16 +272,38 @@ class PF():
             img = self.read_image(imgname).astype(np.uint8)
             ibx = self.disp_imgs(img[box[1]:box[1]+box[3],box[0]:box[0]+box[2],:], boxed, ny=2, nx=1, size=(img.shape[1],img.shape[0]), scale=0.5, show_img=True)
 
+    def save_video(self, imglist):
+
+        fps = 8
+        size = (self.H*2,self.W)
+        fourcc = cv2.VideoWriter_fourcc('m','p','4','v')
+        outv = cv2.VideoWriter()
+        outv.open('./result.mp4', fourcc, fps, size, isColor=True)
+        point_color = (0, 255, 0) # BGR
+        thickness = 2 
+        lineType = 4
+        boxlist = self.pos_list
+
+        for imgname, box in tqdm(zip(imgnamelist, boxlist)):
+            img = self.read_image(imgname).astype(np.uint8)
+            ptLeftTop = (box[0], box[1])
+            ptRightBottom = (box[0]+box[2], box[1]+box[3])
+            boxed = cv2.rectangle(img, ptLeftTop, ptRightBottom, point_color, thickness, lineType)
+            img = self.read_image(imgname).astype(np.uint8)
+            ibx = self.disp_imgs(img[box[1]:box[1]+box[3],box[0]:box[0]+box[2],:], boxed, ny=2, nx=1, size=(img.shape[1],img.shape[0]), scale=1.0, show_img=False)
+            outv.write(ibx)
+
+        outv.release()
 
 if __name__ == '__main__':
-    imgdir = r'./data/Dudek/img/'
-    gtfile = r'./data/Dudek/groundtruth_rect.txt'
+    imgdir = r'./data/Man/img/'
+    gtfile = r'./data/Man/groundtruth_rect.txt'
     imgtype = r'jpg'
 
     imgnamelist = make_file_list(imgdir, imgtype)
     groundtruth = np.loadtxt(gtfile, delimiter=',',dtype=int).tolist()
     # groundtruth = [[97, 79, 100, 100]]
-    pf = PF(300, 0.5, 0.5)
+    pf = PF(600, 0.6, 0.8)
 
     pf.initial(imgnamelist[0], groundtruth[0])
     pf.track(imgnamelist)
@@ -262,4 +312,5 @@ if __name__ == '__main__':
     
     # print(groundtruth)
     # pf.show_box(imgnamelist, groundtruth)
-    pf.show_box(imgnamelist, pf.pos_list)
+    # pf.show_box(imgnamelist, pf.pos_list)
+    pf.save_video(imgnamelist)
