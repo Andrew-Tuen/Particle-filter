@@ -164,6 +164,8 @@ class PF():
             self.resample()
             self.predict(30*t)
             t = self.cal_weight(img)
+            pos = self.get_pos()
+            self.show_particles(img, pos)
             self.change_scale()
             self.cal_weight(img)
             pos = self.get_pos()
@@ -305,14 +307,14 @@ class PF():
         outv.release()
 
 if __name__ == '__main__':
-    imgdir = r'./data/Bird1/img/'
-    gtfile = r'./data/Bird1/groundtruth_rect.txt'
+    imgdir = r'./data/Trans/img/'
+    gtfile = r'./data/Trans/groundtruth_rect.txt'
     imgtype = r'jpg'
 
     imgnamelist = make_file_list(imgdir, imgtype)
     groundtruth = np.loadtxt(gtfile, delimiter=',',dtype=int).tolist()
     # groundtruth = [[97, 79, 100, 100]]
-    pf = PF(300, 0.1, 0.8)
+    pf = PF(300, 0.8, 0.8)
 
     pf.initial(imgnamelist[0], groundtruth[0])
     pf.track(imgnamelist)
