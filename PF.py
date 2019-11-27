@@ -102,26 +102,35 @@ class PF():
     def change_scale(self):
         
         tmpp = self.particles[:20].copy()
-        for scale in np.arange(0.6,1.2,0.01):
+        # for scale in np.arange(0.6,1.2,0.01):
+        #     scdp = tmpp[:20].copy()*1.0
+        #     shift = scdp[:,2:]*(1.0-scale)*0.5
+        #     scdp[:,:2] += shift
+        #     scdp[:,2:] *= scale
+        #     tmpp = np.vstack([tmpp,scdp])
+        for s in np.arange(0.5,1.5,0.01):
+            scale = (np.random.randn(20,2)*0.3)+s
+
             scdp = tmpp[:20].copy()*1.0
             shift = scdp[:,2:]*(1.0-scale)*0.5
             scdp[:,:2] += shift
             scdp[:,2:] *= scale
             tmpp = np.vstack([tmpp,scdp])
+
         self.particles = np.round(tmpp).astype(np.int64)
         self.particles[self.particles<1] = 1
 
     def get_pos(self):
 
         
-        tmpw = self.weights[:100]
-        tmpp = self.particles[:100]
+        tmpw = self.weights[:10]
+        tmpp = self.particles[:10]
 
         # subparticle = subparticle[:int(self.N/10)]
         # subweight = subweight[:int(self.N/10)]
         
         tmpw = tmpw / np.sum(tmpw)
-        pos = 0.3*self.ref_box + 0.7*np.sum(tmpp*np.expand_dims(tmpw,-1), axis=0)
+        pos = 0.1*self.ref_box + 0.9*np.sum(tmpp*np.expand_dims(tmpw,-1), axis=0)
 
         # pos = np.sum(self.particles*np.expand_dims(self.weights,-1), axis=0)
         # pos = self.particles[np.argmax(self.weights)]
@@ -158,7 +167,7 @@ class PF():
             self.change_scale()
             self.cal_weight(img)
             pos = self.get_pos()
-            # self.show_particles(img, pos)
+            self.show_particles(img, pos)
             # self.cal_scale(pos)
             self.pos_list.append(pos.tolist())
             self.update_speed(pos)
@@ -296,14 +305,14 @@ class PF():
         outv.release()
 
 if __name__ == '__main__':
-    imgdir = r'./data/Man/img/'
-    gtfile = r'./data/Man/groundtruth_rect.txt'
+    imgdir = r'./data/Trans/img/'
+    gtfile = r'./data/Trans/groundtruth_rect.txt'
     imgtype = r'jpg'
 
     imgnamelist = make_file_list(imgdir, imgtype)
     groundtruth = np.loadtxt(gtfile, delimiter=',',dtype=int).tolist()
     # groundtruth = [[97, 79, 100, 100]]
-    pf = PF(600, 0.6, 0.8)
+    pf = PF(200, 0.5, 0.8)
 
     pf.initial(imgnamelist[0], groundtruth[0])
     pf.track(imgnamelist)
