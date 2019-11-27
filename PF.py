@@ -70,7 +70,7 @@ class PF():
     def cal_weight(self, img):
         N = len(self.particles)
         subimgs = [self.cut_img(img, self.particles[i]) for i in range(N)]
-        # self.disp_imgs(*subimgs, nx=7, ny=15, size=(100,100), scale=0.7, name='FIGURE', show_img=True)
+        # self.disp_imgs(*subimgs, nx=9, ny=23, size=(80,100), scale=0.7, name='FIGURE', show_img=True)
 
         subhist = [self.three_channel_hist(subimgs[i]) for i in range(N)]
         dis2ref = [cv2.compareHist(subhist[i], self.ref_hist, method=cv2.HISTCMP_BHATTACHARYYA) for i in range(N)]
@@ -108,8 +108,8 @@ class PF():
         #     scdp[:,:2] += shift
         #     scdp[:,2:] *= scale
         #     tmpp = np.vstack([tmpp,scdp])
-        for s in np.arange(0.5,1.5,0.01):
-            scale = (np.random.randn(20,2)*0.3)+s
+        for s in np.arange(0.8,1.2,0.01):
+            scale = (np.random.randn(20,2)*0.15)+s
 
             scdp = tmpp[:20].copy()*1.0
             shift = scdp[:,2:]*(1.0-scale)*0.5
@@ -183,8 +183,8 @@ class PF():
         Return: 
             hist: 直方图  float  (256C)
         """
-        
-        hist = [cv2.calcHist([img], [i], None, [256], [0,256]) for i in range(3)]
+        frame = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hist = [cv2.calcHist([frame], [i], None, [256], [0,256]) for i in range(3)]
         hist = np.vstack(hist)
         return hist
 
@@ -305,14 +305,14 @@ class PF():
         outv.release()
 
 if __name__ == '__main__':
-    imgdir = r'./data/Trans/img/'
-    gtfile = r'./data/Trans/groundtruth_rect.txt'
+    imgdir = r'./data/Bird1/img/'
+    gtfile = r'./data/Bird1/groundtruth_rect.txt'
     imgtype = r'jpg'
 
     imgnamelist = make_file_list(imgdir, imgtype)
     groundtruth = np.loadtxt(gtfile, delimiter=',',dtype=int).tolist()
     # groundtruth = [[97, 79, 100, 100]]
-    pf = PF(200, 0.5, 0.8)
+    pf = PF(300, 0.1, 0.8)
 
     pf.initial(imgnamelist[0], groundtruth[0])
     pf.track(imgnamelist)
